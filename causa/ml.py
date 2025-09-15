@@ -6,6 +6,8 @@ from torch.optim import Adam, SGD
 from torch.optim.lr_scheduler import ExponentialLR, CosineAnnealingLR
 from torch.distributions import Normal
 import logging
+from nflows.flows import SimpleRealNVP
+from torch.nn.functional import relu
 
 
 def heteroscedastic_normal(f, y, nu_noise=0.0, param_1='natural', param_2='additive'):
@@ -142,3 +144,97 @@ def map_optimization(model,
                         + f'Perf={epoch_perf:.3f}; lr={scheduler.get_last_lr()[0]:.7f}')
 
     return model, losses, valid_perfs, valid_nlls, f2s
+
+
+
+########################################################################################
+def contruct_nn(features, hidden_features, num_layers, num_blocks_per_layer,
+                use_volume_preserving = False, batch_norm_within_layers = False,
+                batch_norm_between_layers = False,
+                activation = relu, dropout_probability = 0):
+
+    # define nn design
+    model_flow_SimpleRealNVP = SimpleRealNVP(
+        features                = features,
+        hidden_features         = hidden_features,
+        num_layers              = num_layers,
+        num_blocks_per_layer    = num_blocks_per_layer,
+        use_volume_preserving   = use_volume_preserving, # False: affinity coupling
+        activation              = activation,
+        dropout_probability     = dropout_probability,
+        batch_norm_within_layers= batch_norm_within_layers,
+        batch_norm_between_layers=batch_norm_between_layers
+    )
+    
+    return model_flow_SimpleRealNVP
+
+def mod_opt_joint_loglik(model,
+            train_loader,
+            n_epochs=500,
+            lr=1e-3,
+            lr_min=None,
+            optimizer='Adam',
+            scheduler='exp'):
+    
+    # assert lr value
+    if lr_min is None:  # don't decay lr
+        lr_min = lr
+
+    # number of obs.
+    N = len(train_loader.dataset)
+    
+    # set up model optimizer
+    if optimizer == 'Adam':
+        optimizer = Adam(model.parameters(), lr=lr)
+    elif optimizer == 'SGD':
+        optimizer = SGD(model.parameters(), lr=lr, momentum=0.9)
+    else:
+        raise ValueError(f'Invalid optimizer {optimizer}')
+    
+    # set up scheduler for lr decay
+    n_steps = n_epochs * len(train_loader)
+    if scheduler == 'exp':
+        min_lr_factor = lr_min / lr
+        gamma = np.exp(np.log(min_lr_factor) / n_steps)
+        scheduler = ExponentialLR(optimizer, gamma=gamma)
+    elif scheduler == 'cos':
+        scheduler = CosineAnnealingLR(optimizer, n_steps, eta_min=lr_min)
+    else:
+        raise ValueError(f'Invalid scheduler {scheduler}')
+    
+    # list to store results
+    losses = list()
+
+    for epoch in range(1, n_epochs + 1):
+        epoch_loss = 0
+
+        # standard NN training per batch
+        for batch in train_loader:
+            if isinstance(batch, (tuple, list)):
+                batch = batch[0]
+            else:
+                batch = batch
+
+            optimizer.zero_grad()
+            
+            # estimate mean loss
+            loss = - (model.log_prob(batch).sum()) / N  # N: [n obs.]
+
+            # Backward pass
+            loss.backward()
+
+            total_norm = sum(p.grad.data.norm(2).item()**2 for p in model.parameters() if p.grad is not None)**0.5
+
+            # updates the model's parameters
+            optimizer.step()
+
+            # sum losses for all bacthes
+            epoch_loss += loss.cpu().item() / len(train_loader)    
+
+            # update scheduler
+            scheduler.step()
+
+        losses.append(epoch_loss * N)
+        # print(f"Epoch {epoch}: avg loss training: {loss:.4f},... Gradient Norm: {total_norm:.4f}")
+
+    return model, losses

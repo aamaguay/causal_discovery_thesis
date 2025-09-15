@@ -17,7 +17,7 @@ class ANLSMN(CausalDataset):
 
     def __init__(self, pair_id=None, path=DATA_DIR, double=False, preprocessor=None):
         assert pair_id in list(range(1, self.n_datasets+1))
-        directory = DATA_DIR + '/' + self.folder_name
+        directory = '.' +  DATA_DIR + '/' + self.folder_name # '..' + DATA_DIR + '/' + self.folder_name
         df = pd.read_csv(directory + f'/pair_{pair_id}.txt', delimiter=',')
         ground_truth = pd.read_csv(directory + '/pairs_gt.txt', header=None).iloc[pair_id-1].values[0]
         if ground_truth == 1:  # true order
@@ -89,7 +89,7 @@ class Tuebingen(CausalDataset):
 
     def __init__(self, pair_id=None, path=DATA_DIR, double=False, preprocessor=None):
         assert pair_id in list(range(1, self.n_datasets+1))
-        directory = DATA_DIR + '/' + self.folder_name
+        directory = '.' + DATA_DIR + '/' + self.folder_name # '..'+ DATA_DIR + '/' + self.folder_name
         df = pd.read_csv(directory + f'/pair{pair_id:04d}.txt', delim_whitespace=True, header=None)
         # TODO: to use weight need to cast weight column to float..
         meta = pd.read_csv(directory + '/pairmeta.txt', delim_whitespace=True, 
@@ -163,7 +163,7 @@ class Dataverse(CausalDataset):
 
     def __init__(self, pair_id=None, path=DATA_DIR, double=False, preprocessor=None):
         assert pair_id in list(range(1, self.n_datasets+1))
-        directory = DATA_DIR + '/' + self.folder_name + '/' + self.file_name
+        directory = '.' + DATA_DIR + '/' + self.folder_name + '/' + self.file_name # '..' + DATA_DIR + '/' + self.folder_name + '/' + self.file_name
         pairs = pd.read_csv(directory + '_pairs.csv')
         targets = pd.read_csv(directory + '_targets.csv')
         target = targets.loc[pair_id-1, 'Target']

@@ -133,7 +133,7 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# results folder
+# Intermediate experiment outputs
 **/partial_results/
 **/final_results_config/
 

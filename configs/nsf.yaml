@@ -1,0 +1,142 @@
+conf1:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 10
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf2:
+  hidden_features: 100
+  num_layers: 4
+  num_blocks_per_layer: 4
+  num_bins: 10
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf3:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 15
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf4:
+  hidden_features: 64
+  num_layers: 8
+  num_blocks_per_layer: 6
+  num_bins: 15
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf5:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 15
+  tails: linear
+  tail_bound: 5
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf6:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 15
+  tails: linear
+  tail_bound: 5
+  activation: relu
+  dropout_probability: 0.2
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf7:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 13
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0.2
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf8:
+  hidden_features: 128
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 12
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0.2
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf9:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 4
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0.1
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf10:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 13
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf11:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  num_bins: 4
+  tails: linear
+  tail_bound: 3
+  activation: relu
+  dropout_probability: 0
+  apply_unconditional_transform: false
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false

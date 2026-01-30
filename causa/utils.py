@@ -2,6 +2,7 @@ from math import ceil
 import numpy as np
 import matplotlib.pyplot as plt
 import torch
+import yaml
 
 from tueplots import bundles, axes
 
@@ -111,3 +112,79 @@ def plot_pair(x, y, f_forward, f_reverse, dark=False):
         axs[1].grid()
         plt.savefig(f'MNU_{dark}.png', transparent=True)
         plt.show()
+
+REQUIRED_PARAMS = {
+    "nsf": {
+        "hidden_features",
+        "num_layers",
+        "num_blocks_per_layer",
+        "num_bins",
+        "tails",
+        "tail_bound",
+        "activation",
+        "dropout_probability",
+        "apply_unconditional_transform",
+        "batch_norm_within_layers",
+        "batch_norm_between_layers",
+    },
+    "realnvp": {
+        "hidden_features",
+        "num_layers",
+        "num_blocks_per_layer",
+        "use_volume_preserving",
+        "activation",
+        "dropout_probability",
+        "batch_norm_within_layers",
+        "batch_norm_between_layers",
+    },
+}
+
+def load_flow_config(
+    flow_name: str,
+    conf_name: str | None,
+    custom_config: dict | None,
+    features: int,
+):
+    # activation functions
+    ACTIVATIONS = {
+    "relu": torch.relu,
+    "leaky_relu": torch.nn.functional.leaky_relu,
+    "elu": torch.nn.functional.elu,
+    }
+    # 1. Mutually exclusive
+    if conf_name is None and custom_config is None:
+        raise ValueError("Either conf_name or custom_config must be provided.")
+
+    if conf_name is not None and custom_config is not None:
+        raise ValueError("Provide only one of conf_name or custom_config.")
+
+    # 2. Load predefined config
+    if conf_name is not None:
+        with open(f"configs/{flow_name}.yaml") as f:
+            all_confs = yaml.safe_load(f)
+
+        if conf_name not in all_confs:
+            raise ValueError(f"Unknown {flow_name} config '{conf_name}'")
+
+        cfg = all_confs[conf_name]
+
+    else:
+        cfg = custom_config
+
+    # 3. Validate required keys
+    missing = REQUIRED_PARAMS[flow_name] - cfg.keys()
+    if missing:
+        raise ValueError(
+            f"Missing parameters for {flow_name}: {sorted(missing)}"
+        )
+
+    # 4. Add common arguments
+    cfg = dict(cfg)  # copy
+
+    cfg.update(
+        flow_name=flow_name,
+        features=features,
+        activation=ACTIVATIONS[cfg["activation"]]
+    )
+
+    return cfg

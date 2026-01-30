@@ -1,0 +1,69 @@
+conf1:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: relu
+  dropout_probability: 0
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf2:
+  hidden_features: 100
+  num_layers: 4
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: relu
+  dropout_probability: 0
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf3:
+  hidden_features: 100
+  num_layers: 6
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: relu
+  dropout_probability: 0
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf4:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 6
+  use_volume_preserving: false
+  activation: relu
+  dropout_probability: 0
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf5:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: relu
+  dropout_probability: 0.5
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf6:
+  hidden_features: 64
+  num_layers: 6
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: leaky_relu
+  dropout_probability: 0.2
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false
+
+conf7:
+  hidden_features: 128
+  num_layers: 6
+  num_blocks_per_layer: 4
+  use_volume_preserving: false
+  activation: elu
+  dropout_probability: 0.1
+  batch_norm_within_layers: false
+  batch_norm_between_layers: false

@@ -132,3 +132,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# results folder
+partial_results/
+
+# other experiment files
+local_run_test/

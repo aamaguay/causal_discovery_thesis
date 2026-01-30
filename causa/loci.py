@@ -3,13 +3,13 @@ import torch
 from torch import nn
 from causa.utils import TensorDataLoader
 from sklearn.preprocessing import StandardScaler, SplineTransformer
+from causa.utils import load_flow_config
 
 from causa.hsic import HSIC
 from causa.het_ridge import convex_fgls
 from causa.ml import map_optimization, mod_opt_joint_loglik, contruct_nn
-from torch.nn.functional import relu
+from torch.nn.functional import relu, leaky_relu, elu
 from torch.utils.data import DataLoader, TensorDataset
-
 
 def set_seed(seed):
     np.random.seed(seed)
@@ -134,185 +134,239 @@ def het_fit_convex(x, y, n_steps=None):
 
     return -nll, f
 
-    
-def loci(x, y, independence_test=True, neural_network=True, return_function=False, n_steps=None):
-    """Location Scale Causal Inference (LOCI) for bivariate pairs. By default,
-    the method returns a score for the x -> y causal direction where above 0
-    indicates evidence for it and negative values indicate y -> x.
 
-    Note: data x, y should be standardized or preprocessed in some way.
-    
-    Parameters
-    ----------
-    x : np.ndarray
-        cause/effect vector 1-dimensional
-    y : np.ndarray
-        cause/effect vector 1-dimensional
-    independence_test : bool, optional
-        whether to run subsequent independence test of residuals, by default True
-    neural_network : bool, optional
-        whether to use neural network heteroscedastic estimator, by default True
-    return_function : bool, optional
-        whether to return functions to predict mean/std in both directions, by default False
-    n_steps : int, optional
-        number of epochs to train neural network or steps to optimize convex model
+def compute_marginal_likelihood_nn(
+    x,
+    conf_name=None,
+    flow_name=None,
+    n_steps=None,
+    custom_map_kwargs=None,
+    seed=711,
+    device="cpu",
+):
     """
-    assert x.ndim == y.ndim == 1, 'x and y have to be 1-dimensional arrays'
-    if neural_network:
-        log_lik_forward, f_forward = het_fit_nn(x, y, n_steps)
-        log_lik_reverse, f_reverse = het_fit_nn(y, x, n_steps)
-    else:
-        log_lik_forward, f_forward = het_fit_convex(x, y, n_steps)
-        log_lik_reverse, f_reverse = het_fit_convex(y, x, n_steps)
+    Estimate the marginal log-likelihood of a one-dimensional variable x
+    using a noise-augmented normalizing flow.
 
-    if independence_test:
-        my, sy = f_forward(x)
-        indep_forward = HSIC(x, (y - my) / sy)
-        mx, sx = f_reverse(y)
-        indep_reverse = HSIC(y, (x - mx) / sx)
-        score = indep_reverse - indep_forward
-    else:
-        score = log_lik_forward - log_lik_reverse
+    The method augments x with independent Gaussian noise e ~ N(0, 1) to form
+    a two-dimensional variable (x, e), trains a normalizing flow on the joint
+    distribution p(x, e), and recovers the marginal density via:
 
-    if return_function:
-        return score, f_forward, f_reverse
-    return score
+        log p(x) = log p(x, e) - log p(e)
 
-
-#############################################################################
-def compute_marginal_likelihood_nn(x, n_steps=None, seed=711, device='cpu'):
-    """
-    Estimate the marginal log-likelihood of a 1D variable `x` using an 
-    augmented normalizing flow (RealNVP-based), where noise is added 
-    to project the 1D variable into a higher-dimensional space.
-
-    The function:
-    - Adds independent Gaussian noise to `x` to create a 2D input [x, e]
-    - Trains a RealNVP normalizing flow model on the joint distribution p(x, e)
-    - Uses the change-of-variable formula to estimate log p(x)
-      via log p(x) = log p(x, e) - log p(e)
-    - Returns the average marginal log-likelihood per sample
+    The returned value is the average marginal log-likelihood per sample.
 
     Parameters
     ----------
-    x : array-like of shape (n,)
-        The 1D input data whose marginal density is to be estimated.
-    n_steps : int, optional
-        Number of training epochs (default is 5000).
+    x : np.ndarray of shape (n,)
+        One-dimensional input data.
+    conf_name : str or None, default=None
+        Name of a predefined flow configuration (e.g. "conf1").
+    flow_name : str or None, default=None
+        Name of the normalizing flow ("nsf", "realnvp").
+    n_steps : int or None, default=None
+        Number of training epochs for the flow (default: 5000).
+    custom_map_kwargs : dict or None, default=None
+        Custom configuration dictionary for the flow. Mutually exclusive
+        with conf_name.
     seed : int, default=711
         Random seed for reproducibility.
-    device : str, default='cpu'
-        Device to use for training ('cpu' or 'cuda').
+    device : str, default="cpu"
+        Device to use for training ("cpu" or "cuda").
 
     Returns
     -------
     marg_log_lik : float
-        The estimated average marginal log-likelihood per sample for x.
+        Estimated average marginal log-likelihood per sample for x.
     model : nn.Module
-        The trained normalizing flow model (fitted on [x, noise]).
-    new_x : torch.Tensor of shape (n, 2)
-        The augmented data matrix used during training (original x and noise).
+        Trained normalizing flow model on (x, e).
     """
+    if flow_name is None:
+        raise ValueError("flow_name must be provided for marginal likelihood estimation.")
+
+    if conf_name is not None and custom_map_kwargs is not None:
+        raise ValueError("Provide only one of conf_name or custom_map_kwargs.")
+
     n_steps = 5000 if n_steps is None else n_steps
 
-    # define new matrix with additional noise
-    # generate random noise
+    # Ensure correct shape: (n,)
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError("x must be a one-dimensional array of shape (n,)")
+
     set_seed(seed)
-    n = len(x) 
-    noise = torch.randn(n)  # mean 0, std 1 by default
-    new_x = torch.tensor(np.stack([x, noise], axis=1), dtype=torch.float32)
-    
-    # define parameters for the flow design
-    map_kwargs = dict(
-        features                = new_x.shape[1],
-        hidden_features         = 64,
-        num_layers              = 6,
-        num_blocks_per_layer    = 4,
-        use_volume_preserving   = False, # False: affinity coupling
-        activation              = relu,
-        dropout_probability     = 0,
-        batch_norm_within_layers= False,
-        batch_norm_between_layers=False
+
+    x_t = torch.tensor(x, dtype=torch.float32, device=device)
+    n = x_t.shape[0]
+
+    # Augment with independent Gaussian noise
+    noise = torch.randn(n, device=device)
+    x_aug = torch.stack([x_t, noise], dim=1)  # shape (n, 2)
+
+    # Load flow configuration
+    map_kwargs = load_flow_config(
+        flow_name=flow_name,
+        conf_name=conf_name,
+        custom_config=custom_map_kwargs,
+        features=2,
     )
-    
-    # define data batches
+
+    # Data loader (full batch)
     loader = DataLoader(
-        TensorDataset(new_x), 
-        batch_size=len(x),
-        shuffle=False
+        TensorDataset(x_aug),
+        batch_size=n,
+        shuffle=False,
     )
-        
-    # set flow and nn parameter
-    flow_nn = contruct_nn(**map_kwargs)
 
-    # estimation
+    # Construct and train flow
+    model = contruct_nn(**map_kwargs)
     model, losses = mod_opt_joint_loglik(
-                        model           = flow_nn,
-                        train_loader    = loader,
-                        n_epochs        = n_steps,
-                        lr              = 1e-2,
-                        lr_min          = 1e-6,
-                        optimizer       = 'Adam',
-                        scheduler       = 'exp'
+        model=model,
+        train_loader=loader,
+        n_epochs=n_steps,
+        lr=1e-2,
+        lr_min=1e-6,
+        optimizer="Adam",
+        scheduler="exp",
     )
 
-    joint_log_lik = - np.nanmin(losses)
-    log_prob_noise = (-0.5 * noise.numpy()**2 - 0.5 * np.log(2 * np.pi)).sum()
-    marg_log_lik = (joint_log_lik - log_prob_noise) / len(x)
+    log_p_xe = - np.nanmin(losses)
 
-    return marg_log_lik, model, new_x 
+    # Exact log-density of Gaussian noise
+    log_p_e = (-0.5 * noise.numpy()**2 - 0.5 * np.log(2 * np.pi)).sum()
+    marg_log_lik = (log_p_xe - log_p_e) / n
 
-def loci_w_marginal(x, y, independence_test=True, 
-                    neural_network=True, return_function=False, 
-                    n_steps=None,
-                    marginal_loglik = False):
-    """Location Scale Causal Inference (LOCI) for bivariate pairs. By default,
-    the method returns a score for the x -> y causal direction where above 0
-    indicates evidence for it and negative values indicate y -> x.
+    return marg_log_lik, model
 
-    Note: data x, y should be standardized or preprocessed in some way.
-    
+
+
+def loci(
+    x,
+    y,
+    independence_test=True,
+    neural_network=True,
+    return_function=False,
+    n_steps_cond_prob=None,
+    flow_name=None,
+    conf_name=None,
+    n_steps_marg_prob=None,
+    marginal_loglik=False,
+    custom_map_kwargs=None,
+):
+    """
+    Location–Scale Causal Inference (LOCI) for bivariate causal discovery.
+
+    LOCI evaluates the causal direction between two one-dimensional variables
+    x and y by fitting heteroscedastic location–scale models in both directions
+    (x → y and y → x) and comparing either:
+      - residual independence (HSIC-based), or
+      - likelihood-based scores.
+
+    By convention:
+        score > 0  → evidence for x → y  
+        score < 0  → evidence for y → x
+
     Parameters
     ----------
-    x : np.ndarray
-        cause/effect vector 1-dimensional
-    y : np.ndarray
-        cause/effect vector 1-dimensional
-    independence_test : bool, optional
-        whether to run subsequent independence test of residuals, by default True
-    neural_network : bool, optional
-        whether to use neural network heteroscedastic estimator, by default True
-    return_function : bool, optional
-        whether to return functions to predict mean/std in both directions, by default False
-    n_steps : int, optional
-        number of epochs to train neural network or steps to optimize convex model
+    x : np.ndarray of shape (n,)
+        First variable.
+    y : np.ndarray of shape (n,)
+        Second variable.
+    independence_test : bool, default=True
+        If True, use residual independence (HSIC) for scoring.
+        If False, use likelihood-based scoring.
+    neural_network : bool, default=True
+        If True, use neural network-based heteroscedastic estimators.
+        If False, use convex baseline estimators.
+    return_function : bool, default=False
+        If True, also return fitted conditional and marginal models.
+    n_steps_cond_prob : int or None, default=None
+        Training steps for conditional models.
+    flow_name : str or None, default=None
+        Name of the normalizing flow used for marginal likelihoods.
+    conf_name : str or None, default=None
+        Name of predefined flow configuration.
+    n_steps_marg_prob : int or None, default=None
+        Training steps for marginal likelihood estimation.
+    marginal_loglik : bool, default=False
+        If True, include marginal log-likelihood terms in the score.
+        This yields an extension of original LOCI.
+    custom_map_kwargs : dict or None, default=None
+        Custom configuration dictionary for the flow.
+
+    Returns
+    -------
+    score : float
+        LOCI causal score.
+    (optional)
+    f_forward : callable
+        Conditional mean/scale estimator for y | x.
+    f_reverse : callable
+        Conditional mean/scale estimator for x | y.
+    f_forward_marg : nn.Module or None
+        Marginal density model for x (if enabled).
+    f_reverse_marg : nn.Module or None
+        Marginal density model for y (if enabled).
     """
+
     assert x.ndim == y.ndim == 1, 'x and y have to be 1-dimensional arrays'
+
+    # --------------------
+    # Conditional models
+    # --------------------
     if neural_network:
-        log_lik_forward, f_forward = het_fit_nn(x, y, n_steps)
-        log_lik_reverse, f_reverse = het_fit_nn(y, x, n_steps)
+        log_lik_xy, f_xy = het_fit_nn(x, y, n_steps_cond_prob)
+        log_lik_yx, f_yx = het_fit_nn(y, x, n_steps_cond_prob)
     else:
-        log_lik_forward, f_forward = het_fit_convex(x, y, n_steps)
-        log_lik_reverse, f_reverse = het_fit_convex(y, x, n_steps)
-    
+        log_lik_xy, f_xy = het_fit_convex(x, y, n_steps_cond_prob)
+        log_lik_yx, f_yx = het_fit_convex(y, x, n_steps_cond_prob)
+
+    # --------------------
+    # Marginal likelihoods (optional)
+    # --------------------
+    log_marg_xy = 0.0
+    log_marg_yx = 0.0
+    f_marg_x = None
+    f_marg_y = None
+
     if marginal_loglik:
-        log_marg_lik_forward, model_f, new_x_f = compute_marginal_likelihood_nn(x = x, n_steps = n_steps)
-        log_marg_lik_reverse, model_r, new_x_r = compute_marginal_likelihood_nn(x = y, n_steps = n_steps)
-    else:
-        log_marg_lik_forward = 0
-        log_marg_lik_reverse = 0
+        if flow_name is None:
+            raise ValueError("flow_name must be provided when marginal_loglik=True")
 
+        log_marg_xy, f_marg_x = compute_marginal_likelihood_nn(
+            x,
+            conf_name=conf_name,
+            flow_name=flow_name,
+            n_steps=n_steps_marg_prob,
+            custom_map_kwargs=custom_map_kwargs,
+        )
 
+        log_marg_yx, f_marg_y = compute_marginal_likelihood_nn(
+            y,
+            conf_name=conf_name,
+            flow_name=flow_name,
+            n_steps=n_steps_marg_prob,
+            custom_map_kwargs=custom_map_kwargs,
+        )
+
+    # --------------------
+    # Scoring
+    # --------------------
     if independence_test:
-        my, sy = f_forward(x)
-        indep_forward = HSIC(x, (y - my) / sy)
-        mx, sx = f_reverse(y)
-        indep_reverse = HSIC(y, (x - mx) / sx)
-        score = indep_reverse - indep_forward
-    else:
-        score_orig = (log_lik_forward ) - (log_lik_reverse )
-        score_new = (log_lik_forward + log_marg_lik_forward) - (log_lik_reverse + log_marg_lik_reverse)
+        my, sy = f_xy(x)
+        mx, sx = f_yx(y)
 
+        indep_xy = HSIC(x, (y - my) / sy)
+        indep_yx = HSIC(y, (x - mx) / sx)
+
+        score = indep_yx - indep_xy  # positive → x → y
+    else:
+        score = (log_lik_xy + log_marg_xy) - (log_lik_yx + log_marg_yx)
+
+    # --------------------
+    # Return
+    # --------------------
     if return_function:
-        return score_new, score_orig, model_f, model_r, new_x_f, new_x_r, f_forward, f_reverse
-    return score_new, score_orig
+        return score, f_xy, f_yx, f_marg_x, f_marg_y
+
+    return score

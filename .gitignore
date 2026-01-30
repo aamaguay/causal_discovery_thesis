@@ -134,7 +134,8 @@ dmypy.json
 .pyre/
 
 # results folder
-partial_results/
+**/partial_results/
+**/final_results_config/
 
 # other experiment files
-local_run_test/
+**/local_run_test/

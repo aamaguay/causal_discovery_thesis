@@ -8,6 +8,7 @@ from torch.distributions import Normal
 import logging
 from nflows.flows import SimpleRealNVP
 from torch.nn.functional import relu
+from causa.nsf import SimpleNSF
 
 
 def heteroscedastic_normal(f, y, nu_noise=0.0, param_1='natural', param_2='additive'):
@@ -260,67 +261,3 @@ def mod_opt_joint_loglik(model,
         # print(f"Epoch {epoch}: avg loss training: {loss:.4f},... Gradient Norm: {total_norm:.4f}")
 
     return model, losses
-
-
-
-#######################################################################################################
-#### Simple NSF PiecewiseRationalQuadraticCouplingTransform ###########################################
-from nflows.transforms.coupling import PiecewiseRationalQuadraticCouplingTransform
-from nflows.flows.base import Flow
-from torch.nn import functional as F
-from nflows.nn import nets as nets
-from nflows.distributions.normal import StandardNormal
-from nflows.transforms.base import CompositeTransform
-from nflows.transforms.normalization import BatchNorm
-
-class SimpleNSF(Flow):
-    def __init__(
-        self,
-        features,
-        hidden_features,
-        num_layers,
-        num_blocks_per_layer,
-        num_bins=10,
-        tails="linear",
-        tail_bound=3.0,
-        dropout_probability=0.0,
-        activation=F.relu,
-        apply_unconditional_transform = False,
-        batch_norm_within_layers=False,
-        batch_norm_between_layers=False,
-    ):
-        mask = torch.ones(features)
-        mask[::2] = -1
-
-        def create_transform_net(in_features, out_features):
-            return nets.ResidualNet(
-                in_features,
-                out_features,
-                hidden_features=hidden_features,
-                num_blocks=num_blocks_per_layer,
-                activation=activation,
-                dropout_probability=dropout_probability,
-                use_batch_norm=batch_norm_within_layers,
-            )
-
-        layers = []
-        for _ in range(num_layers):
-            transform = PiecewiseRationalQuadraticCouplingTransform(
-                mask=mask,
-                transform_net_create_fn=create_transform_net,
-                num_bins=num_bins,
-                tails=tails,
-                tail_bound=tail_bound,
-                apply_unconditional_transform = apply_unconditional_transform
-            )
-            layers.append(transform)
-            mask *= -1
-            if batch_norm_between_layers:
-                layers.append(BatchNorm(features=features))
-
-        super().__init__(
-            transform=CompositeTransform(layers),
-            distribution=StandardNormal([features]),
-        )
-
-

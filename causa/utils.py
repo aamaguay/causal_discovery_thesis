@@ -6,6 +6,9 @@ import yaml
 
 from tueplots import bundles, axes
 
+from nflows.nn import nets
+from nflows.transforms.base import CompositeTransform
+from nflows.transforms.normalization import BatchNorm
 
 class TensorDataLoader:
     """Combination of torch's DataLoader and TensorDataset for efficient batch
@@ -188,3 +191,46 @@ def load_flow_config(
     )
 
     return cfg
+
+
+def build_coupling_flow(
+    *,
+    features: int,
+    num_layers: int,
+    coupling_factory,
+    hidden_features: int,
+    num_blocks_per_layer: int,
+    activation,
+    dropout_probability: float,
+    batch_norm_within_layers: bool,
+    batch_norm_between_layers: bool,
+):
+    """
+    Build a sequence of masked coupling layers with optional batch norm.
+
+    coupling_factory(mask, create_net) -> Transform
+    """
+
+    mask = torch.ones(features)
+    mask[::2] = -1
+
+    def create_net(in_features, out_features):
+        return nets.ResidualNet(
+            in_features,
+            out_features,
+            hidden_features=hidden_features,
+            num_blocks=num_blocks_per_layer,
+            activation=activation,
+            dropout_probability=dropout_probability,
+            use_batch_norm=batch_norm_within_layers,
+        )
+
+    layers = []
+    for _ in range(num_layers):
+        layers.append(coupling_factory(mask, create_net))
+        mask *= -1
+        if batch_norm_between_layers:
+            layers.append(BatchNorm(features=features))
+
+    return CompositeTransform(layers)
+
